@@ -7,6 +7,6 @@ const app = new cdk.App();
 new DigitalWorkerStack(app, 'DigitalWorkerFactory', {
   env: {
     account: process.env.CDK_DEFAULT_ACCOUNT,
-    region: 'eu-west-1',
+    region: 'us-east-1', // Cheapest region for Bedrock
   },
 });
