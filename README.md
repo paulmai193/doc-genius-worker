@@ -1,4 +1,4 @@
-# AI Digital Worker Factory
+# DocGenius Worker
 
 An AWS-native serverless application that automatically generates technical specifications from NopCommerce source code using AI.
 

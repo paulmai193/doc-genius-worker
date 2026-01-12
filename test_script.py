@@ -178,7 +178,7 @@ def wait_for_completion(job_id, max_wait_time=300):
 def main():
     """Main test function"""
     
-    print("AI Digital Worker Factory - Test Script")
+    print("DocGenius Worker - Test Script")
     print("=" * 50)
     
     # Update API URL

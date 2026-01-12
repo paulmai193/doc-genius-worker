@@ -107,11 +107,11 @@
 ### 5.1 Data Architecture
 | Data Object | Source | Storage | Retention | Security |
 |------------|--------|---------|-----------|----------|
-| **Source Code Archive** | Uploaded ZIP (via API) | S3 bucket `digital-worker-input` (encrypted SSE‑KMS) | ≤ 24 h (auto‑delete) | IAM role `WorkerInputAccess` (read/write limited) |
+| **Source Code Archive** | Uploaded ZIP (via API) | S3 bucket `docgenius-worker-input` (encrypted SSE‑KMS) | ≤ 24 h (auto‑delete) | IAM role `WorkerInputAccess` (read/write limited) |
 | **Feature Descriptor** | JSON payload | Same input bucket | ≤ 24 h | Same controls |
-| **Generated Spec** | LLM output (text) → PDF/Markdown | S3 bucket `digital-worker-output` (encrypted) | ≤ 24 h (auto‑delete) | IAM role `WorkerOutputAccess` |
-| **Execution Log** | Step Functions & Lambda logs | CloudWatch Logs (log group `digital-worker`) | 30 days retention | KMS‑encrypted logs, audit‑enabled |
-| **Metadata (Job ID, status, timestamps)** | DynamoDB table `DigitalWorkerJobs` | DynamoDB (encrypted) | Unlimited (archival) | Fine‑grained IAM |
+| **Generated Spec** | LLM output (text) → PDF/Markdown | S3 bucket `docgenius-worker-output` (encrypted) | ≤ 24 h (auto‑delete) | IAM role `WorkerOutputAccess` |
+| **Execution Log** | Step Functions & Lambda logs | CloudWatch Logs (log group `docgenius-worker`) | 30 days retention | KMS‑encrypted logs, audit‑enabled |
+| **Metadata (Job ID, status, timestamps)** | DynamoDB table `DocGeniusWorkerJobs` | DynamoDB (encrypted) | Unlimited (archival) | Fine‑grained IAM |
 
 ### 5.2 Application Architecture
 ```
@@ -157,7 +157,7 @@
 | **LLM** | AI generation | Amazon Bedrock (Claude‑Instant) | Model version `anthropic.claude-v2:1` |
 | **Storage** | Input/Output artifacts | Amazon S3 (two buckets) | SSE‑KMS, lifecycle policy (expire 1 day) |
 | **Metadata** | Job tracking | Amazon DynamoDB (PK=JobId) | PITR enabled |
-| **Notification** | User feedback | Amazon SNS (topic `DigitalWorkerEvents`) | Email subscription for PoC review |
+| **Notification** | User feedback | Amazon SNS (topic `DocGeniusWorkerEvents`) | Email subscription for PoC review |
 | **Security** | Encryption, access control | AWS KMS, IAM, CloudTrail, GuardDuty | IAM roles per Lambda, audit logs |
 | **Observability** | Metrics & logs | Amazon CloudWatch (Metrics, Logs) | Custom metrics: `DocsGenerated`, `ProcessingTime` |
 | **CI/CD (optional)** | Deploy IaC | AWS CodePipeline + CodeBuild | Deploy CDK stack from GitHub repo |

@@ -171,7 +171,7 @@ The purpose of this BRD is to define, in detail, the business‑level and soluti
 
 | Audience | Channel | Frequency | Owner |
 |----------|--------|-----------|-------|
-| All Stakeholders | Slack channel `#digital-worker` | Real‑time updates | BA Lead |
+| All Stakeholders | Slack channel `#docgenius-worker` | Real‑time updates | BA Lead |
 | Product Manager & QA | Email summary + Confluence page | Every 2 days | Product Owner |
 | Security Officer | Secure log export (CSV) | End‑of‑day | Security Champion |
 | Hackathon Judges | Live Zoom demo | Final day | Team Lead |
@@ -265,7 +265,7 @@ The purpose of this BRD is to define, in detail, the business‑level and soluti
 
 | Rule ID | Description |
 |---------|-------------|
-| **BR‑A1** | All source‑code archives must be encrypted using KMS key `alias/digital-worker-key`. |
+| **BR‑A1** | All source‑code archives must be encrypted using KMS key `alias/docgenius-worker-key`. |
 | **BR‑A2** | Generated documents must contain a header with: Project name, Module, Generation timestamp, Version. |
 | **BR‑A3** | If Bedrock returns an error, the job status must be marked **Failed** and the source archive deleted. |
 | **BR‑A4** | No more than **5** documents may be generated per day in the PoC phase. |
@@ -293,11 +293,11 @@ The purpose of this BRD is to define, in detail, the business‑level and soluti
 |----|-------------|-----------|
 | **FR‑01** | **Spec Generation** – Lambda **Generator** shall retrieve the source archive and feature descriptor, construct a Bedrock prompt, invoke the LLM, and receive the spec text. → Addresses: **BR‑001** |
 | **FR‑02** | **Document Formatting** – Generator shall convert LLM text to Markdown, then to PDF (using wkhtmltopdf library). → Addresses: **BR‑001**, **BR‑002** |
-| **FR‑03** | **Secure Storage** – Input archive stored in S3 bucket `digital-worker-input` with SSE‑KMS; output stored in `digital-worker-output` with same encryption. → Addresses: **BR‑003** |
+| **FR‑03** | **Secure Storage** – Input archive stored in S3 bucket `docgenius-worker-input` with SSE‑KMS; output stored in `docgenius-worker-output` with same encryption. → Addresses: **BR‑003** |
 | **FR‑04** | **API Service** – API Gateway endpoint **POST /generate‑spec** shall accept multipart/form‑data (ZIP + JSON) and return a job‑ID. → Addresses: **BR‑004** |
 | **FR‑05** | **Orchestration & Cleanup** – Step Functions workflow shall invoke Lambdas in order, handle retries, and trigger **Cleanup** Lambda to delete objects after 24 h or on failure. → Addresses: **BR‑003**, **BR‑005** |
-| **FR‑06** | **Notification** – On completion (success or failure) the system shall publish a message to SNS topic `DigitalWorkerEvents` with a presigned URL (if success) or error details. → Addresses: **BR‑004**, **BR‑007** |
-| **FR‑07** | **Metadata Persistence** – DynamoDB table `DigitalWorkerJobs` shall store job‑ID, status, timestamps, user, and S3 object keys. → Addresses: **BR‑007** |
+| **FR‑06** | **Notification** – On completion (success or failure) the system shall publish a message to SNS topic `DocGeniusWorkerEvents` with a presigned URL (if success) or error details. → Addresses: **BR‑004**, **BR‑007** |
+| **FR‑07** | **Metadata Persistence** – DynamoDB table `DocGeniusWorkerJobs` shall store job‑ID, status, timestamps, user, and S3 object keys. → Addresses: **BR‑007** |
 | **FR‑08** | **Observability** – Lambdas shall emit custom CloudWatch metrics: `DocsGenerated`, `ProcessingTimeMs`, `FailedJobs`. → Addresses: **BR‑005**, **BR‑007** |
 
 ### 7.3 Non‑Functional Requirements (NFR)  
@@ -336,7 +336,7 @@ The purpose of this BRD is to define, in detail, the business‑level and soluti
 
 **US‑002**  
 
-- **AC‑001:** *Given* a job finishes (success or failure), *when* 24 h elapse, *then* the source archive is no longer present in `digital-worker-input`.  
+- **AC‑001:** *Given* a job finishes (success or failure), *when* 24 h elapse, *then* the source archive is no longer present in `docgenius-worker-input`.  
 - **AC‑002:** *Given* the cleanup Lambda runs, *when* it attempts to delete the object, *then* an audit log record is written with `DeleteAction=Success`.  
 
 **US‑003**  
@@ -356,11 +356,11 @@ The purpose of this BRD is to define, in detail, the business‑level and soluti
 - **Main Success Scenario:**  
 
   1. Developer calls POST `/generate-spec` with payload.  
-  2. API Gateway validates request and writes payload to `digital-worker-input` bucket.  
+  2. API Gateway validates request and writes payload to `docgenius-worker-input` bucket.  
   3. Step Functions start, invoking **Source Loader** Lambda.  
   4. **Spec Generator** Lambda builds Bedrock prompt and receives spec text.  
   5. Formatter converts text to Markdown → PDF.  
-  6. Output stored in `digital-worker-output`.  
+  6. Output stored in `docgenius-worker-output`.  
   7. DynamoDB job record updated to **Succeeded**.  
   8. SNS sends notification with presigned URL.  
   9. Cleanup Lambda scheduled for 24 h later.  
@@ -422,7 +422,7 @@ The purpose of this BRD is to define, in detail, the business‑level and soluti
 | **Lambda – Spec Generator** | Builds Bedrock prompt, calls LLM, formats output. | Core AI generation block; reusable across domains. |
 | **Lambda – Cleanup Worker** | Deletes source artefacts after 24 h or on failure. | Reusable secure‑delete utility. |
 | **Amazon Bedrock** | Provides Claude‑Instant LLM for text generation. | Service‑agnostic AI layer. |
-| **S3 Buckets** | `digital-worker-input` (encrypted, lifecycle 1 day) and `digital-worker-output` (encrypted, TTL 1 day). | Standard for asset storage. |
+| **S3 Buckets** | `docgenius-worker-input` (encrypted, lifecycle 1 day) and `docgenius-worker-output` (encrypted, TTL 1 day). | Standard for asset storage. |
 | **DynamoDB Table** | Stores job metadata, status, timestamps. | Generic job‑tracking store. |
 | **SNS Topic** | Publishes success/failure notifications. | Can feed Slack, Teams, email. |
 | **CloudWatch** | Metrics, alarms, dashboards. | Enterprise‑wide observability. |
@@ -434,7 +434,7 @@ The purpose of this BRD is to define, in detail, the business‑level and soluti
 |-----------|------|----------|----------------|
 | **API Endpoint** | REST | HTTPS (TLS 1.2) | `POST /generate-spec` (multipart/form‑data), `GET /job-status/{id}` (JSON) |
 | **Lambda – Bedrock Call** | Service API | HTTPS (AWS SDK) | Model ID `anthropic.claude-v2:1`, max tokens 4 k |
-| **S3 Object Access** | REST/SDK | HTTPS | Presigned URL TTL 24 h, SSE‑KMS `alias/digital-worker-key` |
+| **S3 Object Access** | REST/SDK | HTTPS | Presigned URL TTL 24 h, SSE‑KMS `alias/docgenius-worker-key` |
 | **SNS Notification** | Pub/Sub | HTTPS (HTTPS endpoint) | Message JSON: `{jobId, status, url?, error}` |
 | **CloudWatch Metric** | Custom | – | `DocsGenerated`, `ProcessingTimeMs`, `FailedJobs` |
 
@@ -473,16 +473,16 @@ The purpose of this BRD is to define, in detail, the business‑level and soluti
 | Requirement | Metric |
 |-------------|--------|
 | **Completeness** | All mandatory fields (JobID, Status, timestamps) must be non‑null. |
-| **Integrity** | InputKey must reference an existing object in `digital-worker-input`. |
+| **Integrity** | InputKey must reference an existing object in `docgenius-worker-input`. |
 | **Accuracy** | MD5 hash of uploaded archive must match stored value. |
 | **Timeliness** | Job CompletionTime – SubmitTS ≤ 2 min (performance). |
 
 ### 10.5 Data Governance and Compliance  
 
 - **Retention:** SourceArchive and GeneratedDocument objects automatically deleted after 24 h (S3 lifecycle).  
-- **Encryption:** SSE‑KMS with key `alias/digital-worker-key`.  
+- **Encryption:** SSE‑KMS with key `alias/docgenius-worker-key`.  
 - **Audit:** All read/write actions logged to CloudTrail; immutable for 30 days.  
-- **Access Control:** IAM role `DigitalWorkerJobRole` limited to required actions; no public access.  
+- **Access Control:** IAM role `DocGeniusWorkerJobRole` limited to required actions; no public access.  
 
 ---  
 

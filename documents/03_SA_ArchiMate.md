@@ -120,7 +120,7 @@ The **AI Digital Worker Factory** delivers a serverless, AWS‑native micro‑se
 | **Runtime** | Python 3.11 for Lambda; compatible with Bedrock SDK. |
 | **API Design** | OpenAPI 3.0, JSON‑Schema validation, versioning via `/v1/`. |
 | **Logging** | Structured JSON logs sent to CloudWatch Logs; include `requestId`, `jobId`, `level`. |
-| **Metrics** | CloudWatch custom namespace `DigitalWorkerFactory`. |
+| **Metrics** | CloudWatch custom namespace `DocGeniusWorkerFactory`. |
 | **Security** | IAM policies use `aws:RequestedRegion` condition; KMS key policy restricts to service roles. |
 | **Testing** | PyTest for unit tests, SAM local for integration, Postman collection for API smoke tests. |
 
@@ -141,7 +141,7 @@ The **AI Digital Worker Factory** delivers a serverless, AWS‑native micro‑se
 |----------|----------------|
 | **Authentication** | API Gateway IAM auth (signed request) or Cognito‑User‑Pools (optional). |
 | **Authorization** | IAM role per Lambda (`SourceLoaderRole`, `SpecGeneratorRole`, `CleanupRole`) with least‑privilege policies. |
-| **Encryption at Rest** | SSE‑KMS with CMK `alias/digital-worker-key`. |
+| **Encryption at Rest** | SSE‑KMS with CMK `alias/docgenius-worker-key`. |
 | **Encryption in Transit** | TLS 1.2 enforced by API Gateway and S3 VPC endpoints. |
 | **Network Isolation** | VPC endpoints for S3, Bedrock; Lambda functions placed in private subnets. |
 | **Audit Logging** | CloudTrail captures all S3/DynamoDB/Bedrock actions; logs retained 30 days. |
@@ -168,7 +168,7 @@ The **AI Digital Worker Factory** delivers a serverless, AWS‑native micro‑se
 * **Processing Layer** – Three Lambda functions (Source Loader, Spec Generator, Cleanup).  
 * **AI Layer** – Amazon Bedrock (Claude‑Instant).  
 * **Storage Layer** – Two S3 buckets (input, output) with KMS encryption; DynamoDB for job metadata.  
-* **Notification Layer** – Amazon SNS topic `DigitalWorkerEvents`.  
+* **Notification Layer** – Amazon SNS topic `DocGeniusWorkerEvents`.  
 * **Observability Layer** – CloudWatch Metrics, Logs, Alarms; CloudTrail for audit.  
 
 ### 4.3 Component Architecture  
@@ -177,8 +177,8 @@ The **AI Digital Worker Factory** delivers a serverless, AWS‑native micro‑se
 |-----------|----------------|-------|--------|
 | **API Gateway** | Accepts HTTP requests, performs auth, forwards to Step Functions. | Multipart/form‑data (ZIP + JSON) | HTTP 202 + `jobId` |
 | **Step Functions** | Coordinates workflow, retries, error handling. | `jobId` | Invokes Lambdas, updates DynamoDB. |
-| **Source Loader Lambda** | Validates payload, writes ZIP & JSON to `digital-worker-input`. | Raw request body | S3 object keys stored in DynamoDB. |
-| **Spec Generator Lambda** | Retrieves objects, builds prompt, calls Bedrock, formats result, writes output to `digital-worker-output`. | S3 keys (input) | PDF/MD object key, status = `Succeeded`/`Failed`. |
+| **Source Loader Lambda** | Validates payload, writes ZIP & JSON to `docgenius-worker-input`. | Raw request body | S3 object keys stored in DynamoDB. |
+| **Spec Generator Lambda** | Retrieves objects, builds prompt, calls Bedrock, formats result, writes output to `docgenius-worker-output`. | S3 keys (input) | PDF/MD object key, status = `Succeeded`/`Failed`. |
 | **Cleanup Lambda** | Runs on a timer (24 h) or immediate on failure; deletes source ZIP and optionally output. | DynamoDB `ExpiresAt` | Deleted objects, audit log entry. |
 | **DynamoDB Job Table** | Stores job metadata, status, timestamps, S3 keys. | – | Queryable by API for status. |
 | **SNS Topic** | Publishes success/failure messages (jobId, URL, error). | Lambda publish call | Email/Webhook subscription. |
@@ -191,7 +191,7 @@ The **AI Digital Worker Factory** delivers a serverless, AWS‑native micro‑se
 * **Lambda ↔ Bedrock** – AWS SDK call `invoke_model`; prompt includes source‑code excerpts and feature JSON.  
 * **Lambda ↔ S3** – `boto3` `put_object`/`get_object` using VPC endpoint.  
 * **Lambda ↔ DynamoDB** – `put_item`, `update_item`, `query` on `JobId`.  
-* **Lambda ↔ SNS** – `publish` to `DigitalWorkerEvents`.  
+* **Lambda ↔ SNS** – `publish` to `DocGeniusWorkerEvents`.  
 
 ---
 
@@ -254,7 +254,7 @@ The **AI Digital Worker Factory** delivers a serverless, AWS‑native micro‑se
 |-----------|----------------|
 | **API Gateway** | **REST** model, stage `dev` → `v1`; request validation schema for multipart/form‑data; throttling 10 TPS; IAM auth (signing v4). |
 | **Step Functions** | **State Machine**: `ValidateInput` → `LoadSource` → `GenerateSpec` → `StoreOutput` → `NotifySuccess` → `ScheduleCleanup`. Each state has `Catch` that routes to `NotifyFailure` → `ScheduleCleanup`. |
-| **Message Broker (SNS)** | Topic `DigitalWorkerEvents`; subscription options: email (for judges), HTTP endpoint (for future webhook). Message schema: `{jobId, status, url?, errorMessage}`. |
+| **Message Broker (SNS)** | Topic `DocGeniusWorkerEvents`; subscription options: email (for judges), HTTP endpoint (for future webhook). Message schema: `{jobId, status, url?, errorMessage}`. |
 | **Event Handling** | Cleanup Lambda triggered by **EventBridge** rule `cron(0 * * * ? *)` (hourly) plus a **Step Functions** `Wait for 24h` state on success path. |
 
 ---
@@ -317,7 +317,7 @@ The **AI Digital Worker Factory** delivers a serverless, AWS‑native micro‑se
 
 | Table | Partition Key | Sort Key | Attributes |
 |-------|----------------|----------|------------|
-| **DigitalWorkerJobs** | `JobId` (String UUID) | `Metadata` (static) | `Status`, `SubmitTime`, `StartTime`, `EndTime`, `InputKey`, `OutputKey`, `PresignedUrl`, `ErrorMessage`, `ExpiresAt` (TTL) |
+| **DocGeniusWorkerJobs** | `JobId` (String UUID) | `Metadata` (static) | `Status`, `SubmitTime`, `StartTime`, `EndTime`, `InputKey`, `OutputKey`, `PresignedUrl`, `ErrorMessage`, `ExpiresAt` (TTL) |
 
 #### Physical Considerations  
 
@@ -344,7 +344,7 @@ The **AI Digital Worker Factory** delivers a serverless, AWS‑native micro‑se
 
 | Process | Source | Target | Transformation |
 |---------|--------|--------|----------------|
-| **Job Creation** | API request | DynamoDB `DigitalWorkerJobs` | Insert with `Status=Pending`, compute `ExpiresAt`. |
+| **Job Creation** | API request | DynamoDB `DocGeniusWorkerJobs` | Insert with `Status=Pending`, compute `ExpiresAt`. |
 | **Status Update** | Step Functions → Lambda | DynamoDB `Status` attribute | Atomic `UpdateItem` with condition expression. |
 | **Cleanup Query** | EventBridge (hourly) | DynamoDB `Status=Succeeded` & `EndTime+24h <= now` | Scan via GSI, then invoke Cleanup Lambda. |
 | **Quality Checks** (future) | Generated PDF/MD | S3 → Lambda validation function | Parse Markdown, verify required sections, write result to DynamoDB `QualityScore`. |
@@ -413,7 +413,7 @@ The **AI Digital Worker Factory** delivers a serverless, AWS‑native micro‑se
 | Environment | Resources | Isolation |
 |------------|-----------|-----------|
 | **Development** | Full CDK stack deployed in AWS account `fhm-dev`; VPC with private subnets for Lambdas, public S3 static website for UI. | Separate AWS account, IAM roles distinct from prod. |
-| **Testing** | Same stack with `dev` parameters but isolated DynamoDB table (`DigitalWorkerJobs-test`). | Parameter overrides. |
+| **Testing** | Same stack with `dev` parameters but isolated DynamoDB table (`DocGeniusWorkerJobs-test`). | Parameter overrides. |
 | **Production** | Stack deployed in `fhm-prod` account, VPC isolated, using dedicated KMS CMK, SNS topic with production email list. | Strict IAM, GuardDuty enabled. |
 
 ### 11.2 Infrastructure Components  
@@ -423,12 +423,12 @@ The **AI Digital Worker Factory** delivers a serverless, AWS‑native micro‑se
 | **VPC** | Single VPC `10.0.0.0/16`, private subnets `10.0.1.0/24` & `10.0.2.0/24`. | Enables VPC endpoints, isolates Lambdas. |
 | **VPC Endpoints** | S3, Bedrock (private DNS). | No internet egress, data stays in region. |
 | **Lambda Functions** | Memory 256 MB (loader) → 1024 MB (generator), timeout 300 s, reserved concurrency 5. | Sufficient for Bedrock latency, prevents cold‑start burst. |
-| **S3 Buckets** | `digital-worker-input` (Standard‑IA), `digital-worker-output` (Standard‑IA). Both with `BlockPublicAccess`, `Versioning` disabled, `Lifecycle` delete after 1 day. |
+| **S3 Buckets** | `docgenius-worker-input` (Standard‑IA), `docgenius-worker-output` (Standard‑IA). Both with `BlockPublicAccess`, `Versioning` disabled, `Lifecycle` delete after 1 day. |
 | **DynamoDB** | On‑Demand, point‑in‑time recovery enabled, TTL on `ExpiresAt`. |
-| **SNS Topic** | `DigitalWorkerEvents` – no DLQ for PoC, future DLQ optional. |
-| **CloudWatch** | Log groups per Lambda, metric filter for errors, dashboard `DigitalWorkerFactory`. |
+| **SNS Topic** | `DocGeniusWorkerEvents` – no DLQ for PoC, future DLQ optional. |
+| **CloudWatch** | Log groups per Lambda, metric filter for errors, dashboard `DocGeniusWorkerFactory`. |
 | **IAM Roles** | `SourceLoaderRole`, `SpecGeneratorRole`, `CleanupRole`, `APIGatewayExecutionRole`. Each role has explicit `s3:PutObject`, `dynamodb:UpdateItem` etc. |
-| **KMS Key** | Customer‑managed CMK `alias/digital-worker-key` with rotation enabled. |
+| **KMS Key** | Customer‑managed CMK `alias/docgenius-worker-key` with rotation enabled. |
 | **CodePipeline** | Source (GitHub) → Build (CodeBuild – CDK synth & deploy) → Deploy (CloudFormation). |
 | **Monitoring** | CloudWatch Alarms on `ProcessingTimeMs > 120 s` and `FailedJobs > 0`. |
 
@@ -464,10 +464,10 @@ The **AI Digital Worker Factory** delivers a serverless, AWS‑native micro‑se
 
 | Control | Implementation Detail |
 |----------|------------------------|
-| **IAM Policies** | `SourceLoaderRole` – `s3:PutObject` on `digital-worker-input/*`, `dynamodb:PutItem` on `DigitalWorkerJobs`. `SpecGeneratorRole` – `s3:GetObject` on input, `s3:PutObject` on output, `bedrock:InvokeModel`, `dynamodb:UpdateItem`. |
-| **KMS CMK** | Alias `digital-worker-key`; key policy allows only the three Lambda roles and the CloudTrail service. |
+| **IAM Policies** | `SourceLoaderRole` – `s3:PutObject` on `docgenius-worker-input/*`, `dynamodb:PutItem` on `DocGeniusWorkerJobs`. `SpecGeneratorRole` – `s3:GetObject` on input, `s3:PutObject` on output, `bedrock:InvokeModel`, `dynamodb:UpdateItem`. |
+| **KMS CMK** | Alias `docgenius-worker-key`; key policy allows only the three Lambda roles and the CloudTrail service. |
 | **S3 Bucket Policies** | Deny any `s3:GetObject` unless request comes from VPC endpoint; `s3:DeleteObject` allowed only for `CleanupRole`. |
-| **API Gateway Authorizer** | IAM authorizer; optional Cognito user pool for external UI with scopes `digitalworker:generate`. |
+| **API Gateway Authorizer** | IAM authorizer; optional Cognito user pool for external UI with scopes `DocGeniusWorker:generate`. |
 | **Step Functions State Machine** | `LoggingConfiguration` enabled, logs to CloudWatch; `TracingConfiguration` (X‑Ray) optional for deep diagnostics. |
 | **GuardDuty** | Enabled at account level; alerts routed to SNS `SecurityAlerts`. |
 | **Encryption in Transit** | All SDK calls use HTTPS; API Gateway enforces TLS 1.2. |
@@ -524,7 +524,7 @@ The **AI Digital Worker Factory** delivers a serverless, AWS‑native micro‑se
 |------|--------|------|
 | **1** | Push CDK code to `main` branch. | GitHub |
 | **2** | CodePipeline triggers, CodeBuild synthesises CloudFormation. | AWS CodePipeline |
-| **3** | CloudFormation creates/updates stack (`DigitalWorkerFactory-dev`). | CloudFormation |
+| **3** | CloudFormation creates/updates stack (`DocGeniusWorkerFactory-dev`). | CloudFormation |
 | **4** | Smoke test API via Postman collection. | Postman |
 | **5** | Promote to `prod` after judges sign‑off – manual approval in pipeline. | CodePipeline (manual stage) |
 | **6** | Blue‑Green switch (if needed) – create new version of Step Functions, update API GW stage alias. | API GW stage variables |
@@ -670,7 +670,7 @@ Follow the template below and keep the total length ≤ 3000 words.
 
 | Widget | Metric |
 |--------|--------|
-| **DocsGenerated** | Sum of `DigitalWorkerFactory DocsGenerated` (1‑hour period). |
+| **DocsGenerated** | Sum of `DocGeniusWorkerFactory DocsGenerated` (1‑hour period). |
 | **ProcessingTimeMs** | Average of `ProcessingTimeMs`. |
 | **FailedJobs** | Count of `FailedJobs`. |
 | **Lambda Errors** | Sum of `Errors` for each Lambda function. |

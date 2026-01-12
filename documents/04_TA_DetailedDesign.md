@@ -43,8 +43,8 @@ This document translates every **Functional Requirement (FR)** and **User Story 
 | **Runtime** | Python 3.11 for Lambdas (managed layers) |
 | **API** | OpenAPI 3.0, JSON‑Schema validation via API Gateway |
 | **Logging** | Structured JSON (`{timestamp, requestId, jobId, level, message}`) to CloudWatch |
-| **Metrics** | Custom namespace `DigitalWorkerFactory` (see FR‑07) |
-| **Security** | IAM role‑based access, KMS CMK `alias/digital-worker-key`, VPC endpoints for S3 & Bedrock |
+| **Metrics** | Custom namespace `DocGeniusWorkerFactory` (see FR‑07) |
+| **Security** | IAM role‑based access, KMS CMK `alias/docgenius-worker-key`, VPC endpoints for S3 & Bedrock |
 | **Testing** | PyTest ≥ 80 % coverage, SAM‑local integration, Postman collection for API contract |
 | **Packaging** | Lambda zip ≤ 50 MB (API Gateway payload limit) |
 
@@ -56,7 +56,7 @@ This document translates every **Functional Requirement (FR)** and **User Story 
 | **Circuit Breaker (SF)** | Step Functions `Catch` blocks route Bedrock failures to `NotifyFailure` |
 | **Compensation Transaction** | `Cleanup` Lambda acts as compensating action for any failure |
 | **Factory Method** | Spec Generator Lambda builds the Bedrock prompt based on module type |
-| **Observer** | SNS topic `DigitalWorkerEvents` notifies external subscribers |
+| **Observer** | SNS topic `DocGeniusWorkerEvents` notifies external subscribers |
 | **Adapter** | Lambda adapters translate Bedrock JSON response into Markdown → PDF |
 | **Builder** | Prompt Builder utility assembles source‑code snippets + feature JSON into final prompt text |
 
@@ -98,8 +98,8 @@ Below each FR (FR‑01 – FR‑08) we list the linked US, provide an overvi
 | Data Components | Type | Responsibility | Technology | SA Reference |
 |----------------|------|----------------|------------|--------------|
 | **Job Table (DynamoDB)** | Entity | Stores `JobId`, status, S3 keys, timestamps | On‑Demand, PK=`JobId` | SA 5.1 (DynamoDB) |
-| **Input Bucket (`digital-worker-input`)** | Object Store | Holds ZIP & JSON, SSE‑KMS | S3 Standard‑IA, lifecycle 1 day | SA 5.1 (S3) |
-| **Output Bucket (`digital-worker-output`)** | Object Store | Holds generated Markdown & PDF, SSE‑KMS | S3 Standard‑IA, lifecycle 1 day | SA 5.1 (S3) |
+| **Input Bucket (`docgenius-worker-input`)** | Object Store | Holds ZIP & JSON, SSE‑KMS | S3 Standard‑IA, lifecycle 1 day | SA 5.1 (S3) |
+| **Output Bucket (`docgenius-worker-output`)** | Object Store | Holds generated Markdown & PDF, SSE‑KMS | S3 Standard‑IA, lifecycle 1 day | SA 5.1 (S3) |
 
 #### 3.1.3 Detailed Technical Specification  
 
@@ -108,16 +108,16 @@ Below each FR (FR‑01 – FR‑08) we list the linked US, provide an overvi
 **Data Model (DynamoDB Job Item)**  
 
 ```
-Table: DigitalWorkerJobs
+Table: DocGeniusWorkerJobs
 PK: jobId (UUID)
 Attributes:
   - status (String)                // Pending|Running|Succeeded|Failed
   - submitTime (Number)            // epoch ms
   - startTime (Number)             // epoch ms (when SpecGenerator starts)
   - endTime (Number)               // epoch ms (when done)
-  - inputKey (String)              // s3://digital-worker-input/<jobId>/archive.zip
-  - descriptorKey (String)          // s3://digital-worker-input/<jobId>/descriptor.json
-  - outputKey (String)              // s3://digital-worker-output/<jobId>/spec.pdf
+  - inputKey (String)              // s3://docgenius-worker-input/<jobId>/archive.zip
+  - descriptorKey (String)          // s3://docgenius-worker-input/<jobId>/descriptor.json
+  - outputKey (String)              // s3://docgenius-worker-output/<jobId>/spec.pdf
   - latencyMs (Number)              // endTime - startTime
   - errorMessage (String, nullable)
   - expiresAt (Number)              // TTL = submitTime + 86400 000
@@ -153,7 +153,7 @@ GSI: status-index (PK = status)
 | NFR | Implementation |
 |-----|----------------|
 | **Performance (≤ 2 min)** | Lambda memory tuned to 1024 MB; `boto3` client kept warm via provisioned concurrency (2 concurrent) in PoC; Bedrock prompt limited to 2000 tokens. |
-| **Security (SSE‑KMS, IAM)** | IAM role `SpecGeneratorRole` includes only `s3:GetObject`, `s3:PutObject`, `dynamodb:UpdateItem`, `bedrock:InvokeModel`. KMS CMK `alias/digital-worker-key` enforces audit logging. |
+| **Security (SSE‑KMS, IAM)** | IAM role `SpecGeneratorRole` includes only `s3:GetObject`, `s3:PutObject`, `dynamodb:UpdateItem`, `bedrock:InvokeModel`. KMS CMK `alias/docgenius-worker-key` enforces audit logging. |
 | **Scalability** | Stateless Lambda; Step Functions handles concurrent executions; DynamoDB on‑demand auto‑scales. |
 | **Observability** | Emits `ProcessingTimeMs`, `DocsGenerated`, `FailedJobs`; logs include `requestId`, `jobId`. |
 | **Compliance** | All resources deployed in `eu-west-1`; S3 lifecycle 1 day; DynamoDB TTL 30 days. |
@@ -214,7 +214,7 @@ GSI: status-index (PK = status)
 2. Calls **Markdown Converter** → `spec.md`.  
 3. Passes `spec.md` to **PDF Renderer** → `spec.pdf`.  
 4. Calls **Validation Service**: ensures that headings `## Overview`, `## Functional Requirements`, `## Non‑Functional Requirements`, `## Acceptance Criteria` exist, and that each bullet contains at least one verb (clarity). If validation fails → set job status `Failed` with error “Missing required sections”.  
-5. Upload both files to Output Bucket (`s3://digital-worker-output/<jobId>/spec.md` & `.pdf`).  
+5. Upload both files to Output Bucket (`s3://docgenius-worker-output/<jobId>/spec.md` & `.pdf`).  
 6. Store S3 keys in DynamoDB `outputKey` (comma‑separated list).  
 
 **API Impact** – The presigned URL returned by **GET /job-status/{jobId}** points to the PDF (primary) and includes a query param `format=md` for Markdown download.  
@@ -371,7 +371,7 @@ components:
 
 1. **Auth** – API Gateway validates IAM signature (`aws:SecureTransport` & `aws:SourceVpce`).  
 2. **Payload Validation** – Lambda checks MIME type, file size (< 50 MB) and validates descriptor JSON against schema (`FeatureDescriptorV1`).  
-3. **Persist Input** – Stores `archive.zip` → `digital-worker-input/<jobId>/archive.zip`; stores descriptor → `digital-worker-input/<jobId>/descriptor.json`.  
+3. **Persist Input** – Stores `archive.zip` → `docgenius-worker-input/<jobId>/archive.zip`; stores descriptor → `docgenius-worker-input/<jobId>/descriptor.json`.  
 4. **Create DynamoDB Job** – `status = Pending`, timestamps, TTL = now + 24 h.  
 5. **Start Step Functions Execution** – Passes `{jobId, inputKey, descriptorKey}`.  
 6. **Return** `202 Accepted` with `{jobId}`.  
@@ -434,8 +434,8 @@ components:
 
 | Data Components | Type | Responsibility | Technology | SA Reference |
 |----------------|------|----------------|------------|--------------|
-| **Input Bucket (`digital-worker-input`)** | Object Store | Holds uploaded ZIP & descriptor, encrypted, 24 h TTL via lifecycle rule. | S3 Standard‑IA, `sse-kms`, lifecycle rule `Expiration: 1 day`. | SA 5.1 |
-| **Output Bucket (`digital-worker-output`)** | Object Store | Holds generated Markdown & PDF, encrypted, 24 h TTL. | S3 Standard‑IA, `sse-kms`, same lifecycle. | SA 5.1 |
+| **Input Bucket (`docgenius-worker-input`)** | Object Store | Holds uploaded ZIP & descriptor, encrypted, 24 h TTL via lifecycle rule. | S3 Standard‑IA, `sse-kms`, lifecycle rule `Expiration: 1 day`. | SA 5.1 |
+| **Output Bucket (`docgenius-worker-output`)** | Object Store | Holds generated Markdown & PDF, encrypted, 24 h TTL. | S3 Standard‑IA, `sse-kms`, same lifecycle. | SA 5.1 |
 | **Job Table (DynamoDB)** | Metadata Store | Stores `expiresAt` (TTL) = `submitTime + 86400 000`. | DynamoDB On‑Demand, TTL enabled. | SA 5.1 |
 | **Cleanup Lambda** | Compute | Runs hourly (EventBridge) or after Step Functions `Wait 24h`; deletes objects whose `expiresAt` passed. | Python 3.11, `boto3` delete_object, IAM role `CleanupRole`. | SA 5.2 |
 
@@ -465,7 +465,7 @@ components:
 
 **Security**  
 
-- Lambda role `CleanupRole` limited to `s3:DeleteObject` on the two bucket ARNs with prefix `digital-worker-*/*`.  
+- Lambda role `CleanupRole` limited to `s3:DeleteObject` on the two bucket ARNs with prefix `docgenius-worker-*/*`.  
 - VPC endpoint for S3 ensures no Internet egress.  
 
 **Non‑Functional Implementation**  
@@ -602,7 +602,7 @@ CleanupOnFailure:
 |------|--------|
 | **Purpose** | Decouple consumers (email, Slack, internal dashboards) from core workflow. |
 | **Architecture Layer** | *Integration Layer* (SNS) + *Orchestration* (Step Functions). |
-| **SA Components Used** | SNS Topic `DigitalWorkerEvents`, Lambda `NotifySuccess` / `NotifyFailure`. |
+| **SA Components Used** | SNS Topic `DocGeniusWorkerEvents`, Lambda `NotifySuccess` / `NotifyFailure`. |
 | **Trigger** | Step Functions state `NotifySuccess` / `NotifyFailure`. |
 
 #### 3.6.2 Component Design  
@@ -611,7 +611,7 @@ CleanupOnFailure:
 |--------------------|------|----------------|------------|--------------|
 | **NotifySuccess Lambda** | Compute | Build JSON payload with `jobId`, `status=Succeeded`, `downloadUrl` (presigned), publish to SNS. | Python 3.11, `boto3` `sns.publish` | SA 5.2 |
 | **NotifyFailure Lambda** | Compute | Build JSON payload with `jobId`, `status=Failed`, `errorMessage`, publish to SNS. | Python 3.11 | SA 5.2 |
-| **SNS Topic** `DigitalWorkerEvents` | Messaging | Fan‑out to email, HTTP webhook, or future Slack integration. | Standard SNS, no DLQ for PoC. | SA 5.2 |
+| **SNS Topic** `DocGeniusWorkerEvents` | Messaging | Fan‑out to email, HTTP webhook, or future Slack integration. | Standard SNS, no DLQ for PoC. | SA 5.2 |
 
 #### 3.6.3 Detailed Technical Specification  
 
@@ -688,7 +688,7 @@ s3_client.generate_presigned_url(
 
 | Component | Type | Responsibility | Technology | SA Reference |
 |-----------|------|----------------|------------|--------------|
-| **Custom CloudWatch Namespace** `DigitalWorkerFactory` | Metrics | `DocsGenerated`, `ProcessingTimeMs`, `FailedJobs`, `NotificationsSent`. | CloudWatch `put_metric_data` | SA 5.2 |
+| **Custom CloudWatch Namespace** `DocGeniusWorkerFactory` | Metrics | `DocsGenerated`, `ProcessingTimeMs`, `FailedJobs`, `NotificationsSent`. | CloudWatch `put_metric_data` | SA 5.2 |
 | **Log Groups** per Lambda (`/aws/lambda/<name>`) | Logs | Structured JSON with `requestId`, `jobId`, `level`. | CloudWatch Logs | SA 5.2 |
 | **X‑Ray Tracing** (optional) | Tracing | End‑to‑end request trace across API GW → Lambda → Bedrock. | AWS X‑Ray SDK | SA 5.3 |
 | **CloudTrail** | Audit | Capture all API calls (S3, DynamoDB, Bedrock, SNS). | CloudTrail | SA 5.4 |
@@ -703,7 +703,7 @@ import os, time, boto3
 cw = boto3.client('cloudwatch')
 def emit_metric(name, value, job_id):
     cw.put_metric_data(
-        Namespace='DigitalWorkerFactory',
+        Namespace='DocGeniusWorkerFactory',
         MetricData=[{
             'MetricName': name,
             'Dimensions':[{'Name':'JobId','Value':job_id}],
@@ -810,7 +810,7 @@ def emit_metric(name, value, job_id):
 |---------|----------------|
 | **Log Format** | JSON with fields: `timestamp`, `requestId`, `jobId`, `level`, `component`, `message`. |
 | **Log Aggregation** | CloudWatch Log Groups per Lambda; subscription filter can forward to Amazon OpenSearch (future). |
-| **Metrics** | Custom namespace `DigitalWorkerFactory` – metrics listed in FR‑07. |
+| **Metrics** | Custom namespace `DocGeniusWorkerFactory` – metrics listed in FR‑07. |
 | **Tracing** | X‑Ray enabled on API Gateway, Lambdas, and Step Functions (optional). |
 | **Alarms** | `ProcessingTimeMs` > 150 s, `FailedJobs` > 0, `CleanupInvocations` > 0 unexpected. |
 | **Dashboard** | Pre‑built CloudWatch dashboard (see FR‑07 dashboard table). |
@@ -821,7 +821,7 @@ def emit_metric(name, value, job_id):
 |-------|---------|
 | **Authentication** | API Gateway IAM auth (SIGV4). For future UI, Cognito User Pool tokens. |
 | **Authorization** | IAM roles: `SourceLoaderRole`, `SpecGeneratorRole`, `CleanupRole`, `APIGatewayHandlerRole`. Each role scoped to specific bucket prefixes and DynamoDB keys. |
-| **Data Protection** | SSE‑KMS (`alias/digital-worker-key`) on both S3 buckets; KMS key policy permits only the four Lambda roles. |
+| **Data Protection** | SSE‑KMS (`alias/docgenius-worker-key`) on both S3 buckets; KMS key policy permits only the four Lambda roles. |
 | **Network Isolation** | All Lambdas placed in private subnets; VPC endpoints for S3 and Bedrock; no internet egress. |
 | **Audit** | CloudTrail logs all S3, DynamoDB, Bedrock, SNS actions; retained 30 days. |
 | **Threat Detection** | GuardDuty enabled; any anomalous S3 delete alerts forwarded to Security SNS topic. |
@@ -830,7 +830,7 @@ def emit_metric(name, value, job_id):
 
 | Pattern | Usage |
 |---------|-------|
-| **Single‑Table DynamoDB** | Stores all job metadata (`DigitalWorkerJobs`). |
+| **Single‑Table DynamoDB** | Stores all job metadata (`DocGeniusWorkerJobs`). |
 | **TTL** | DynamoDB `expiresAt` (30 days) + S3 lifecycle (24 h). |
 | **Caching** | No runtime cache needed (stateless). Future version may cache prompt templates in DynamoDB. |
 | **Backup** | DynamoDB point‑in‑time recovery enabled; S3 versioning disabled (write‑once, auto‑delete). |
@@ -842,7 +842,7 @@ def emit_metric(name, value, job_id):
 |---------------------|----------------|
 | **Request‑Response** | API Gateway → APIGatewayHandler Lambda (FR‑03). |
 | **Event‑Driven** | Step Functions orchestrates Lambdas (FR‑01‑05). |
-| **Publish‑Subscribe** | SNS `DigitalWorkerEvents` (FR‑06). |
+| **Publish‑Subscribe** | SNS `DocGeniusWorkerEvents` (FR‑06). |
 | **Compensation Transaction** | Step Functions `Catch` → Cleanup Lambda (FR‑05). |
 | **Batch Processing** | EventBridge hourly cleanup (FR‑08). |
 
@@ -865,7 +865,7 @@ def emit_metric(name, value, job_id):
 | **S3 Output Bucket** | `dev` / `prod` | CDK (same) | – | SA 5.1 |
 | **DynamoDB Table** | `dev` / `prod` | CDK `aws_dynamodb.Table` (On‑Demand, TTL) | – | SA 5.1 |
 | **SNS Topic** | `dev` / `prod` | CDK `aws_sns.Topic` | – | SA 5.2 |
-| **KMS CMK** | `dev` / `prod` | CDK `aws_kms.Key` (alias `digital-worker-key`) | – | SA 5.1 |
+| **KMS CMK** | `dev` / `prod` | CDK `aws_kms.Key` (alias `docgenius-worker-key`) | – | SA 5.1 |
 | **EventBridge Rule** | `dev` / `prod` | CDK `aws_events.Rule` (cron) | – | SA 5.3 |
 | **CloudWatch Dashboard** | `dev` / `prod` | CDK `aws_cloudwatch.Dashboard` (JSON) | – | SA 5.5 |
 | **CodePipeline** | `dev` / `prod` | CDK `aws_codepipeline.Pipeline` (Source → Build → Deploy) | – | SA 9 (Implementation Strategy) |
@@ -874,11 +874,11 @@ def emit_metric(name, value, job_id):
 
 | Variable | Description | Default (Dev) | Production |
 |---------|-------------|----------------|------------|
-| `INPUT_BUCKET` | Name of the source bucket | `digital-worker-input-dev` | `digital-worker-input` |
-| `OUTPUT_BUCKET` | Name of the output bucket | `digital-worker-output-dev` | `digital-worker-output` |
-| `JOB_TABLE` | DynamoDB table name | `DigitalWorkerJobsDev` | `DigitalWorkerJobs` |
-| `SNS_TOPIC_ARN` | SNS notifications ARN | `arn:aws:sns:eu-west-1:123456789012:DigitalWorkerEventsDev` | production ARN |
-| `KMS_KEY_ARN` | CMK for encryption | `alias/digital-worker-key-dev` | `alias/digital-worker-key` |
+| `INPUT_BUCKET` | Name of the source bucket | `docgenius-worker-input-dev` | `docgenius-worker-input` |
+| `OUTPUT_BUCKET` | Name of the output bucket | `docgenius-worker-output-dev` | `docgenius-worker-output` |
+| `JOB_TABLE` | DynamoDB table name | `DocGeniusWorkerJobsDev` | `DocGeniusWorkerJobs` |
+| `SNS_TOPIC_ARN` | SNS notifications ARN | `arn:aws:sns:eu-west-1:123456789012:DocGeniusWorkerEventsDev` | production ARN |
+| `KMS_KEY_ARN` | CMK for encryption | `alias/docgenius-worker-key-dev` | `alias/docgenius-worker-key` |
 | `BEDROCK_MODEL_ID` | Bedrock model identifier | `anthropic.claude-v2:1` | same |
 | `MAX_TOKENS` | Max tokens for Bedrock request | `4000` | same |
 | `PROVISIONED_CONCURRENCY` | SpecGenerator provisioned concurrency | `2` | `5` (future) |
@@ -890,7 +890,7 @@ All variables are injected as **encrypted environment variables** into Lambdas v
 
 1. **Source** – GitHub `main` branch triggers CodePipeline.  
 2. **Build** – CodeBuild runs `npm ci` → `cdk synth` → `cdk diff`. Unit tests (`pytest`) executed; build fails if coverage < 80 % or `cfn-nag` finds violations.  
-3. **Deploy** – `cdk deploy DigitalWorkerFactory-dev` to dev account; manual approval stage before production deploy.  
+3. **Deploy** – `cdk deploy DocGeniusWorkerFactory-dev` to dev account; manual approval stage before production deploy.  
 4. **Post‑Deploy Tests** – Integration tests executed via `aws cloudformation test` (SAM‑local) to verify end‑to‑end flow.  
 5. **Rollback** – If any stage fails, CloudFormation roll‑back automatically restores previous stack.  
 
@@ -929,7 +929,7 @@ All variables are injected as **encrypted environment variables** into Lambdas v
 | **FR‑03** | US‑001, US‑002 | API Gateway, APIGatewayHandler Lambda, JobStatus Lambda, OpenAPI spec | 2.1, 5.2 | TC‑API‑001 (POST success), TC‑API‑002 (GET status) |
 | **FR‑04** | US‑001, US‑002 | Input/Output S3 Buckets (SSE‑KMS), DynamoDB TTL, Cleanup Lambda (scheduled) | 5.1, 5.2 | TC‑SEC‑001 (S3 encryption), TC‑CLEAN‑001 (lifecycle) |
 | **FR‑05** | US‑002 | Cleanup Lambda (immediate on failure), Step Functions Catch, EventBridge rule | 2.1, 5.3 | TC‑FAIL‑001 (forced Bedrock error → cleanup) |
-| **FR‑06** | US‑003 | NotifySuccess/Failure Lambdas, SNS Topic `DigitalWorkerEvents` | 5.2 | TC‑NOTIF‑001 (SNS message receipt) |
+| **FR‑06** | US‑003 | NotifySuccess/Failure Lambdas, SNS Topic `DocGeniusWorkerEvents` | 5.2 | TC‑NOTIF‑001 (SNS message receipt) |
 | **FR‑07** | US‑004 | CloudWatch custom metrics, CloudTrail, X‑Ray (optional), Dashboard | 5.5, 5.4 | TC‑MON‑001 (metric emission) |
 | **FR‑08** | US‑002 | Wait state (24 h), EventBridge cleanup rule | 2.1, 5.3 | TC‑SCH‑001 (wait → cleanup) |
 
@@ -975,7 +975,7 @@ All variables are injected as **encrypted environment variables** into Lambdas v
 | **Storage** | Amazon S3 (Standard‑IA) | – | SSE‑KMS, lifecycle 1 day. |
 | **Metadata** | Amazon DynamoDB (On‑Demand) | – | Single‑table, TTL enabled. |
 | **Messaging** | Amazon SNS (Standard) | – | JSON payload, email subscription for judges. |
-| **Observability** | Amazon CloudWatch (Metrics, Logs, Dashboard) | – | Custom namespace `DigitalWorkerFactory`. |
+| **Observability** | Amazon CloudWatch (Metrics, Logs, Dashboard) | – | Custom namespace `DocGeniusWorkerFactory`. |
 | **IaC** | AWS CDK (TypeScript) v2 | – | `npm` packages: `aws-cdk-lib`, `constructs`. |
 | **CI/CD** | AWS CodePipeline + CodeBuild (Docker `aws/codebuild/standard:6.0`) | – | Build runs `npm ci`, `cdk synth`, `pytest`. |
 | **Testing** | PyTest ≥ 7, SAM‑local, Postman | – | Coverage target 80 %. |
@@ -988,7 +988,7 @@ All variables are injected as **encrypted environment variables** into Lambdas v
 | **CDK** | Type‑safe constructs, unit tests with `assertions` library, `cdk-nag` for security checks. |
 | **APIs** | OpenAPI 3.0, JSON‑Schema validation via API GW models. |
 | **Logging** | Structured JSON, `requestId` from Lambda context, `jobId` correlation. |
-| **Error Handling** | Raise custom `DigitalWorkerError` with `http_status` attribute; Lambda wrapper converts to proper response. |
+| **Error Handling** | Raise custom `DocGeniusWorkerError` with `http_status` attribute; Lambda wrapper converts to proper response. |
 | **Testing** | 80 % line coverage; mocks for `boto3` via `moto`. |
 | **Versioning** | Lambda functions versioned (`$LATEST` + published version) for safe rollbacks. |
 

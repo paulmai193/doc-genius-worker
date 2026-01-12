@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 import 'source-map-support/register';
 import * as cdk from 'aws-cdk-lib';
-import { DigitalWorkerStack } from '../lib/digital-worker-stack';
+import { DocGeniusWorkerStack } from '../lib/docgenius-worker-stack';
 
 const app = new cdk.App();
-new DigitalWorkerStack(app, 'DigitalWorkerFactory', {
+new DocGeniusWorkerStack(app, 'DocGeniusWorker', {
   env: {
     account: process.env.CDK_DEFAULT_ACCOUNT,
     region: 'us-east-1', // Cheapest region for Bedrock
