@@ -160,12 +160,14 @@ Feature Description:
     return prompt
 
 def call_bedrock(prompt):
-    """Call Bedrock Claude model"""
+    """Call Bedrock Titan model"""
     body = {
-        "prompt": f"\n\nHuman: {prompt}\n\nAssistant:",
-        "max_tokens_to_sample": MAX_TOKENS,
-        "temperature": 0.1,
-        "top_p": 0.9,
+        "inputText": prompt,
+        "textGenerationConfig": {
+            "maxTokenCount": MAX_TOKENS,
+            "temperature": 0.1,
+            "topP": 0.9
+        }
     }
     
     response = bedrock.invoke_model(
@@ -174,7 +176,7 @@ def call_bedrock(prompt):
     )
     
     response_body = json.loads(response['body'].read())
-    return response_body['completion']
+    return response_body['results'][0]['outputText']
 
 def format_as_markdown(spec_text, descriptor):
     """Format spec text as Markdown with front matter"""
