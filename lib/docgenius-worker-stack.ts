@@ -125,7 +125,7 @@ export class DocGeniusWorkerStack extends cdk.Stack {
         INPUT_BUCKET: inputBucket.bucketName,
         OUTPUT_BUCKET: outputBucket.bucketName,
         JOB_TABLE: jobTable.tableName,
-        BEDROCK_MODEL_ID: 'amazon.titan-text-express-v1',
+        BEDROCK_MODEL_ID: 'amazon.nova-micro-v1:0',
         MAX_TOKENS: '4000',
       },
     });
@@ -237,6 +237,11 @@ export class DocGeniusWorkerStack extends cdk.Stack {
         allowOrigins: apigateway.Cors.ALL_ORIGINS,
         allowMethods: apigateway.Cors.ALL_METHODS,
       },
+      binaryMediaTypes: [
+        'multipart/form-data',
+        'multipart/form-data/*',
+        'application/octet-stream'
+      ],
     });
 
     const generateSpecIntegration = new apigateway.LambdaIntegration(apiHandler);
